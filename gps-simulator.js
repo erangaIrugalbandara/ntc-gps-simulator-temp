@@ -8,9 +8,9 @@ const ADMIN_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4ZGRmOGEyYT
 // Route ID mapping - YOU NEED TO UPDATE THESE WITH YOUR ACTUAL DATABASE ROUTE IDS
 // Run this query in MongoDB to get your route IDs: db.routes.find({}, {routeNumber: 1, _id: 1})
 const ROUTE_ID_MAPPING = {
-  'ROUTE_001': '68dda464d12b6ad6fc5fe4d1', // Colombo - Kandy
-  'ROUTE_002': '68dda464d12b6ad6fc5fe4d2', // Colombo - Galle
-  'ROUTE_003': '68dda464d12b6ad6fc5fe4d3', // Colombo - Ratnapura
+  'ROUTE_001': '68de911be04a51b8ead1560c', // Colombo - Kandy
+  'ROUTE_002': '68de911be04a51b8ead1560d', // Colombo - Galle
+  'ROUTE_003': '68de911be04a51b8ead1560e', // Colombo - Ratnapura
   'ROUTE_004': '68dda464d12b6ad6fc5fe4d4', // Colombo - Anuradhapura
   'ROUTE_005': '68dda464d12b6ad6fc5fe4d5'  // Kandy - Badulla
 };
