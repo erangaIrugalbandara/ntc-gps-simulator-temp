@@ -5,6 +5,16 @@ const BUS_ID_MAPPING = require('./busIdMapping');
 const API_URL = 'http://localhost:3000/api/admin/locations';
 const ADMIN_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4ZGRmOGEyYTAyNzExYmNhYWU0YWY1ZiIsImlhdCI6MTc1OTM3ODI1OCwiZXhwIjoxNzkwOTE0MjU4fQ.Vfv7FFk_h0TP2lMlX7QywZJCV_tI2De_Jueebawz9iQ';
 
+// Route ID mapping - YOU NEED TO UPDATE THESE WITH YOUR ACTUAL DATABASE ROUTE IDS
+// Run this query in MongoDB to get your route IDs: db.routes.find({}, {routeNumber: 1, _id: 1})
+const ROUTE_ID_MAPPING = {
+  'ROUTE_001': '68dda464d12b6ad6fc5fe4d1', // Colombo - Kandy
+  'ROUTE_002': '68dda464d12b6ad6fc5fe4d2', // Colombo - Galle
+  'ROUTE_003': '68dda464d12b6ad6fc5fe4d3', // Colombo - Ratnapura
+  'ROUTE_004': '68dda464d12b6ad6fc5fe4d4', // Colombo - Anuradhapura
+  'ROUTE_005': '68dda464d12b6ad6fc5fe4d5'  // Kandy - Badulla
+};
+
 // Real GPS coordinates for Sri Lankan inter-provincial routes
 const ROUTES = {
   'ROUTE_001': {
@@ -114,6 +124,82 @@ const BUS_FLEET = [
   { busId: 'NB-5004', route: 'ROUTE_005', operator: 'Private', serviceType: 'Normal' },
   { busId: 'NB-5005', route: 'ROUTE_005', operator: 'SLTB', serviceType: 'Semi-Luxury' }
 ];
+
+// Store trip IDs
+const TRIP_MAPPING = {};
+
+// Initialize trips for all buses
+async function initializeTrips() {
+  console.log('\n=== Initializing trips for all buses ===\n');
+  
+  for (const busConfig of BUS_FLEET) {
+    try {
+      const dbBusId = BUS_ID_MAPPING[busConfig.busId];
+      const routeId = ROUTE_ID_MAPPING[busConfig.route];
+      
+      if (!dbBusId) {
+        console.log(`❌ No bus mapping for ${busConfig.busId}`);
+        continue;
+      }
+      
+      if (!routeId) {
+        console.log(`❌ No route mapping for ${busConfig.route}`);
+        continue;
+      }
+      
+      // Check if trip already exists for this bus
+      const checkResponse = await axios.get(
+        `http://localhost:3000/api/admin/trips?status=in_progress`,
+        {
+          headers: {
+            'Authorization': `Bearer ${ADMIN_TOKEN}`
+          }
+        }
+      );
+      
+      const existingTrip = checkResponse.data.data.trips.find(
+        trip => trip.bus._id === dbBusId
+      );
+      
+      if (existingTrip) {
+        TRIP_MAPPING[busConfig.busId] = existingTrip._id;
+        console.log(`✓ Existing trip found for ${busConfig.busId}: ${existingTrip._id}`);
+        continue;
+      }
+      
+      // Create new trip
+      const now = new Date();
+      const tripData = {
+        tripNumber: `TRIP-${busConfig.busId}-${Date.now()}`,
+        bus: dbBusId,
+        route: routeId,
+        direction: 'outbound',
+        departureTime: now.toISOString(),
+        arrivalTime: new Date(now.getTime() + 4 * 3600000).toISOString(), // 4 hours later
+        status: 'in_progress'
+      };
+      
+      const response = await axios.post(
+        'http://localhost:3000/api/admin/trips',
+        tripData,
+        {
+          headers: {
+            'Authorization': `Bearer ${ADMIN_TOKEN}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      TRIP_MAPPING[busConfig.busId] = response.data.data.trip._id;
+      console.log(`✓ Trip created for ${busConfig.busId}: ${TRIP_MAPPING[busConfig.busId]}`);
+      
+    } catch (error) {
+      console.error(`❌ Failed to initialize trip for ${busConfig.busId}:`, error.response?.data?.message || error.message);
+    }
+  }
+  
+  console.log(`\n=== Trip initialization complete: ${Object.keys(TRIP_MAPPING).length}/${BUS_FLEET.length} buses ready ===\n`);
+}
 
 class GPSSimulator {
   constructor(busConfig) {
@@ -290,7 +376,6 @@ class GPSSimulator {
   async sendLocationUpdate() {
     try {
       const location = this.getCurrentPosition();
-      
       const dbBusId = BUS_ID_MAPPING[this.busId];
       
       if (!dbBusId) {
@@ -303,7 +388,7 @@ class GPSSimulator {
         latitude: location.lat,
         longitude: location.lng,
         speed: location.speed,
-        heading: this.heading,
+        heading: location.heading,
         timestamp: new Date().toISOString()
       };
 
@@ -314,10 +399,10 @@ class GPSSimulator {
         }
       });
 
-      console.log(`${this.busId}: Location sent - ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)} | ${location.speed}km/h`);
+      console.log(`${this.busId}: ✓ Location sent - ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)} | ${location.speed}km/h`);
       
     } catch (error) {
-      console.error(`${this.busId}: ${error.response?.data?.message || error.message}`);
+      console.error(`${this.busId}: ❌ ${error.response?.data?.message || error.message}`);
     }
   }
 
@@ -369,11 +454,22 @@ class GPSFleetSimulator {
 if (require.main === module) {
   const fleetSimulator = new GPSFleetSimulator();
   
-  fleetSimulator.startFleetSimulation(30000);
+  // Initialize trips first, then start simulation
+  initializeTrips()
+    .then(() => {
+      console.log('\n🚀 Starting GPS fleet simulation...\n');
+      fleetSimulator.startFleetSimulation(30000);
+    })
+    .catch(error => {
+      console.error('Failed to initialize:', error);
+      process.exit(1);
+    });
   
   process.on('SIGINT', () => {
-    console.log('\nShutting down GPS Fleet Simulator...');
+    console.log('\n\nShutting down GPS Fleet Simulator...');
     fleetSimulator.stopFleetSimulation();
     process.exit(0);
   });
 }
+
+module.exports = { GPSFleetSimulator, GPSSimulator };
