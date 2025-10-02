@@ -3,7 +3,7 @@ const BUS_ID_MAPPING = require('./busIdMapping');
 
 // Configuration
 const API_URL = 'http://localhost:3000/api/admin/locations';
-const ADMIN_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4ZGRmOGEyYTAyNzExYmNhYWU0YWY1ZiIsImlhdCI6MTc1OTM3ODI1OCwiZXhwIjoxNzkwOTE0MjU4fQ.Vfv7FFk_h0TP2lMlX7QywZJCV_tI2De_Jueebawz9iQ';
+const ADMIN_TOKEN = 'a6c480f4ea908905a732bc3a98aac0d74760b70b79660aca2393358faa7a850aa7fa98fa18a0b05fa2b4ea3dfd334f7529821305fccf3baee81209aa034a1fd8';
 
 // Route ID mapping - YOU NEED TO UPDATE THESE WITH YOUR ACTUAL DATABASE ROUTE IDS
 // Run this query in MongoDB to get your route IDs: db.routes.find({}, {routeNumber: 1, _id: 1})
@@ -473,3 +473,19 @@ if (require.main === module) {
 }
 
 module.exports = { GPSFleetSimulator, GPSSimulator };
+
+const http = require('http');
+const PORT = process.env.PORT || 10000;
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ 
+    status: 'running', 
+    message: 'GPS Simulator is active',
+    timestamp: new Date().toISOString()
+  }));
+});
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Health check server running on port ${PORT}`);
+});
