@@ -1,23 +1,23 @@
+require('dotenv').config();
 const axios = require('axios');
-const BUS_ID_MAPPING = require('./busIdMapping');
+const http = require('http');
 
-// Configuration
-const API_URL = 'http://localhost:3000/api/admin/locations';
-const ADMIN_TOKEN = 'a6c480f4ea908905a732bc3a98aac0d74760b70b79660aca2393358faa7a850aa7fa98fa18a0b05fa2b4ea3dfd334f7529821305fccf3baee81209aa034a1fd8';
+// Configuration from environment variables
+const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:3000';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+const UPDATE_INTERVAL = parseInt(process.env.UPDATE_INTERVAL) || 30000;
+const HEALTH_CHECK_PORT = parseInt(process.env.HEALTH_CHECK_PORT) || 10000;
 
-// Route ID mapping - YOU NEED TO UPDATE THESE WITH YOUR ACTUAL DATABASE ROUTE IDS
-// Run this query in MongoDB to get your route IDs: db.routes.find({}, {routeNumber: 1, _id: 1})
-const ROUTE_ID_MAPPING = {
-  'ROUTE_001': '68de911be04a51b8ead1560c', // Colombo - Kandy
-  'ROUTE_002': '68de911be04a51b8ead1560d', // Colombo - Galle
-  'ROUTE_003': '68de911be04a51b8ead1560e', // Colombo - Ratnapura
-  'ROUTE_004': '68dda464d12b6ad6fc5fe4d4', // Colombo - Anuradhapura
-  'ROUTE_005': '68dda464d12b6ad6fc5fe4d5'  // Kandy - Badulla
-};
+// Storage for dynamic data
+let ADMIN_TOKEN = null;
+let BUS_ID_MAPPING = {};
+let ROUTE_ID_MAPPING = {};
+let TRIP_MAPPING = {};
 
 // Real GPS coordinates for Sri Lankan inter-provincial routes
 const ROUTES = {
-  'ROUTE_001': {
+  'R001': {
     name: 'Colombo - Kandy',
     waypoints: [
       { lat: 6.9271, lng: 79.8612, name: 'Colombo Fort', stopDuration: 300 },
@@ -34,8 +34,7 @@ const ROUTES = {
     averageSpeed: 45,
     distance: 115
   },
-  
-  'ROUTE_002': {
+  'R002': {
     name: 'Colombo - Galle',
     waypoints: [
       { lat: 6.9271, lng: 79.8612, name: 'Colombo Fort', stopDuration: 300 },
@@ -52,8 +51,7 @@ const ROUTES = {
     averageSpeed: 50,
     distance: 119
   },
-
-  'ROUTE_003': {
+  'R003': {
     name: 'Colombo - Ratnapura',
     waypoints: [
       { lat: 6.9271, lng: 79.8612, name: 'Colombo Fort', stopDuration: 300 },
@@ -67,8 +65,7 @@ const ROUTES = {
     averageSpeed: 40,
     distance: 101
   },
-
-  'ROUTE_004': {
+  'R004': {
     name: 'Colombo - Anuradhapura',
     waypoints: [
       { lat: 6.9271, lng: 79.8612, name: 'Colombo Fort', stopDuration: 300 },
@@ -80,8 +77,7 @@ const ROUTES = {
     averageSpeed: 55,
     distance: 206
   },
-
-  'ROUTE_005': {
+  'R005': {
     name: 'Kandy - Badulla',
     waypoints: [
       { lat: 7.2906, lng: 80.6337, name: 'Kandy Central', stopDuration: 300 },
@@ -98,47 +94,96 @@ const ROUTES = {
 
 // Bus fleet configuration
 const BUS_FLEET = [
-  { busId: 'NB-1001', route: 'ROUTE_001', operator: 'SLTB', serviceType: 'Normal' },
-  { busId: 'NB-1002', route: 'ROUTE_001', operator: 'SLTB', serviceType: 'Semi-Luxury' },
-  { busId: 'NB-1003', route: 'ROUTE_001', operator: 'Private', serviceType: 'AC' },
-  { busId: 'NB-1004', route: 'ROUTE_001', operator: 'SLTB', serviceType: 'Normal' },
-  { busId: 'NB-1005', route: 'ROUTE_001', operator: 'Private', serviceType: 'Semi-Luxury' },
-  { busId: 'NB-2001', route: 'ROUTE_002', operator: 'SLTB', serviceType: 'Normal' },
-  { busId: 'NB-2002', route: 'ROUTE_002', operator: 'Private', serviceType: 'AC' },
-  { busId: 'NB-2003', route: 'ROUTE_002', operator: 'SLTB', serviceType: 'Semi-Luxury' },
-  { busId: 'NB-2004', route: 'ROUTE_002', operator: 'Private', serviceType: 'Normal' },
-  { busId: 'NB-2005', route: 'ROUTE_002', operator: 'SLTB', serviceType: 'AC' },
-  { busId: 'NB-3001', route: 'ROUTE_003', operator: 'SLTB', serviceType: 'Normal' },
-  { busId: 'NB-3002', route: 'ROUTE_003', operator: 'Private', serviceType: 'Semi-Luxury' },
-  { busId: 'NB-3003', route: 'ROUTE_003', operator: 'SLTB', serviceType: 'Normal' },
-  { busId: 'NB-3004', route: 'ROUTE_003', operator: 'Private', serviceType: 'AC' },
-  { busId: 'NB-3005', route: 'ROUTE_003', operator: 'SLTB', serviceType: 'Semi-Luxury' },
-  { busId: 'NB-4001', route: 'ROUTE_004', operator: 'SLTB', serviceType: 'Normal' },
-  { busId: 'NB-4002', route: 'ROUTE_004', operator: 'Private', serviceType: 'AC' },
-  { busId: 'NB-4003', route: 'ROUTE_004', operator: 'SLTB', serviceType: 'Semi-Luxury' },
-  { busId: 'NB-4004', route: 'ROUTE_004', operator: 'Private', serviceType: 'Normal' },
-  { busId: 'NB-4005', route: 'ROUTE_004', operator: 'SLTB', serviceType: 'AC' },
-  { busId: 'NB-5001', route: 'ROUTE_005', operator: 'SLTB', serviceType: 'Normal' },
-  { busId: 'NB-5002', route: 'ROUTE_005', operator: 'Private', serviceType: 'Semi-Luxury' },
-  { busId: 'NB-5003', route: 'ROUTE_005', operator: 'SLTB', serviceType: 'AC' },
-  { busId: 'NB-5004', route: 'ROUTE_005', operator: 'Private', serviceType: 'Normal' },
-  { busId: 'NB-5005', route: 'ROUTE_005', operator: 'SLTB', serviceType: 'Semi-Luxury' }
+  { busNumber: 'NB-1001', route: 'R001', operator: 'SLTB', serviceType: 'Normal' },
+  { busNumber: 'NB-1002', route: 'R001', operator: 'SLTB', serviceType: 'Semi-Luxury' },
+  { busNumber: 'NB-1003', route: 'R001', operator: 'Private', serviceType: 'AC' },
+  { busNumber: 'NB-1004', route: 'R001', operator: 'SLTB', serviceType: 'Normal' },
+  { busNumber: 'NB-1005', route: 'R001', operator: 'Private', serviceType: 'Semi-Luxury' },
+  { busNumber: 'NB-2001', route: 'R002', operator: 'SLTB', serviceType: 'Normal' },
+  { busNumber: 'NB-2002', route: 'R002', operator: 'Private', serviceType: 'AC' },
+  { busNumber: 'NB-2003', route: 'R002', operator: 'SLTB', serviceType: 'Semi-Luxury' },
+  { busNumber: 'NB-2004', route: 'R002', operator: 'Private', serviceType: 'Normal' },
+  { busNumber: 'NB-2005', route: 'R002', operator: 'SLTB', serviceType: 'AC' },
+  { busNumber: 'NB-3001', route: 'R003', operator: 'SLTB', serviceType: 'Normal' },
+  { busNumber: 'NB-3002', route: 'R003', operator: 'Private', serviceType: 'Semi-Luxury' },
+  { busNumber: 'NB-3003', route: 'R003', operator: 'SLTB', serviceType: 'Normal' },
+  { busNumber: 'NB-3004', route: 'R003', operator: 'Private', serviceType: 'AC' },
+  { busNumber: 'NB-3005', route: 'R003', operator: 'SLTB', serviceType: 'Semi-Luxury' },
+  { busNumber: 'NB-4001', route: 'R004', operator: 'SLTB', serviceType: 'Normal' },
+  { busNumber: 'NB-4002', route: 'R004', operator: 'Private', serviceType: 'AC' },
+  { busNumber: 'NB-4003', route: 'R004', operator: 'SLTB', serviceType: 'Semi-Luxury' },
+  { busNumber: 'NB-4004', route: 'R004', operator: 'Private', serviceType: 'Normal' },
+  { busNumber: 'NB-4005', route: 'R004', operator: 'SLTB', serviceType: 'AC' },
+  { busNumber: 'NB-5001', route: 'R005', operator: 'SLTB', serviceType: 'Normal' },
+  { busNumber: 'NB-5002', route: 'R005', operator: 'Private', serviceType: 'Semi-Luxury' },
+  { busNumber: 'NB-5003', route: 'R005', operator: 'SLTB', serviceType: 'AC' },
+  { busNumber: 'NB-5004', route: 'R005', operator: 'Private', serviceType: 'Normal' },
+  { busNumber: 'NB-5005', route: 'R005', operator: 'SLTB', serviceType: 'Semi-Luxury' }
 ];
 
-// Store trip IDs
-const TRIP_MAPPING = {};
+// Authentication function
+async function login() {
+  try {
+    console.log('🔐 Logging in as admin...');
+    const response = await axios.post(`${API_BASE_URL}/api/auth/login`, {
+      username: ADMIN_USERNAME,
+      password: ADMIN_PASSWORD
+    });
+    
+    ADMIN_TOKEN = response.data.data.token;
+    console.log('✓ Login successful');
+    return true;
+  } catch (error) {
+    console.error('❌ Login failed:', error.response?.data?.message || error.message);
+    return false;
+  }
+}
+
+// Fetch bus and route mappings from database
+async function fetchMappings() {
+  try {
+    console.log('\n📡 Fetching bus and route mappings from database...');
+    
+    // Fetch all buses
+    const busResponse = await axios.get(`${API_BASE_URL}/api/admin/buses?limit=100`, {
+      headers: { 'Authorization': `Bearer ${ADMIN_TOKEN}` }
+    });
+    
+    busResponse.data.data.buses.forEach(bus => {
+      BUS_ID_MAPPING[bus.busNumber] = bus._id;
+    });
+    
+    console.log(`✓ Mapped ${Object.keys(BUS_ID_MAPPING).length} buses`);
+    
+    // Fetch all routes
+    const routeResponse = await axios.get(`${API_BASE_URL}/api/admin/routes?limit=100`, {
+      headers: { 'Authorization': `Bearer ${ADMIN_TOKEN}` }
+    });
+    
+    routeResponse.data.data.routes.forEach(route => {
+      ROUTE_ID_MAPPING[route.routeNumber] = route._id;
+    });
+    
+    console.log(`✓ Mapped ${Object.keys(ROUTE_ID_MAPPING).length} routes`);
+    
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to fetch mappings:', error.response?.data?.message || error.message);
+    return false;
+  }
+}
 
 // Initialize trips for all buses
 async function initializeTrips() {
-  console.log('\n=== Initializing trips for all buses ===\n');
+  console.log('\n🚀 Initializing trips for all buses...\n');
   
   for (const busConfig of BUS_FLEET) {
     try {
-      const dbBusId = BUS_ID_MAPPING[busConfig.busId];
+      const dbBusId = BUS_ID_MAPPING[busConfig.busNumber];
       const routeId = ROUTE_ID_MAPPING[busConfig.route];
       
       if (!dbBusId) {
-        console.log(`❌ No bus mapping for ${busConfig.busId}`);
+        console.log(`❌ No bus mapping for ${busConfig.busNumber}`);
         continue;
       }
       
@@ -149,11 +194,9 @@ async function initializeTrips() {
       
       // Check if trip already exists for this bus
       const checkResponse = await axios.get(
-        `http://localhost:3000/api/admin/trips?status=in_progress`,
+        `${API_BASE_URL}/api/admin/trips?status=in_progress&limit=100`,
         {
-          headers: {
-            'Authorization': `Bearer ${ADMIN_TOKEN}`
-          }
+          headers: { 'Authorization': `Bearer ${ADMIN_TOKEN}` }
         }
       );
       
@@ -162,25 +205,25 @@ async function initializeTrips() {
       );
       
       if (existingTrip) {
-        TRIP_MAPPING[busConfig.busId] = existingTrip._id;
-        console.log(`✓ Existing trip found for ${busConfig.busId}: ${existingTrip._id}`);
+        TRIP_MAPPING[busConfig.busNumber] = existingTrip._id;
+        console.log(`✓ Existing trip found for ${busConfig.busNumber}: ${existingTrip._id}`);
         continue;
       }
       
       // Create new trip
       const now = new Date();
       const tripData = {
-        tripNumber: `TRIP-${busConfig.busId}-${Date.now()}`,
+        tripNumber: `TRIP-${busConfig.busNumber}-${Date.now()}`,
         bus: dbBusId,
         route: routeId,
         direction: 'outbound',
         departureTime: now.toISOString(),
-        arrivalTime: new Date(now.getTime() + 4 * 3600000).toISOString(), // 4 hours later
+        arrivalTime: new Date(now.getTime() + 4 * 3600000).toISOString(),
         status: 'in_progress'
       };
       
       const response = await axios.post(
-        'http://localhost:3000/api/admin/trips',
+        `${API_BASE_URL}/api/admin/trips`,
         tripData,
         {
           headers: {
@@ -190,20 +233,21 @@ async function initializeTrips() {
         }
       );
       
-      TRIP_MAPPING[busConfig.busId] = response.data.data.trip._id;
-      console.log(`✓ Trip created for ${busConfig.busId}: ${TRIP_MAPPING[busConfig.busId]}`);
+      TRIP_MAPPING[busConfig.busNumber] = response.data.data.trip._id;
+      console.log(`✓ Trip created for ${busConfig.busNumber}: ${TRIP_MAPPING[busConfig.busNumber]}`);
       
     } catch (error) {
-      console.error(`❌ Failed to initialize trip for ${busConfig.busId}:`, error.response?.data?.message || error.message);
+      console.error(`❌ Failed to initialize trip for ${busConfig.busNumber}:`, error.response?.data?.message || error.message);
     }
   }
   
-  console.log(`\n=== Trip initialization complete: ${Object.keys(TRIP_MAPPING).length}/${BUS_FLEET.length} buses ready ===\n`);
+  console.log(`\n✓ Trip initialization complete: ${Object.keys(TRIP_MAPPING).length}/${BUS_FLEET.length} buses ready\n`);
 }
 
 class GPSSimulator {
   constructor(busConfig) {
-    this.busId = busConfig.busId;
+    this.busNumber = busConfig.busNumber;
+    this.busConfig = busConfig;
     this.route = ROUTES[busConfig.route];
     this.operator = busConfig.operator;
     this.serviceType = busConfig.serviceType;
@@ -219,7 +263,7 @@ class GPSSimulator {
     this.baseSpeed = this.route.averageSpeed;
     this.speedVariation = 0.8 + Math.random() * 0.4;
     
-    console.log(`Bus ${this.busId} initialized on ${this.route.name}`);
+    console.log(`Bus ${this.busNumber} initialized on ${this.route.name}`);
   }
 
   calculateDistance(lat1, lng1, lat2, lng2) {
@@ -253,6 +297,43 @@ class GPSSimulator {
     return { lat, lng };
   }
 
+  async renewTrip() {
+  try {
+    const dbBusId = BUS_ID_MAPPING[this.busNumber];
+    const routeId = ROUTE_ID_MAPPING[this.routeConfig.route];
+    
+    if (!dbBusId || !routeId) return;
+    
+    // Create new trip
+    const now = new Date();
+    const tripData = {
+      tripNumber: `TRIP-${this.busNumber}-${Date.now()}`,
+      bus: dbBusId,
+      route: routeId,
+      direction: this.direction,
+      departureTime: now.toISOString(),
+      arrivalTime: new Date(now.getTime() + 4 * 3600000).toISOString(),
+      status: 'in_progress'
+    };
+    
+    const response = await axios.post(
+      `${API_BASE_URL}/api/admin/trips`,
+      tripData,
+      {
+        headers: {
+          'Authorization': `Bearer ${ADMIN_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    
+    TRIP_MAPPING[this.busNumber] = response.data.data.trip._id;
+    console.log(`✓ New trip created for ${this.busNumber}`);
+  } catch (error) {
+    console.error(`Failed to renew trip for ${this.busNumber}:`, error.message);
+  }
+}
+
   addGPSNoise(lat, lng) {
     const noiseRange = 0.0001;
     const latNoise = (Math.random() - 0.5) * noiseRange;
@@ -282,104 +363,112 @@ class GPSSimulator {
   }
 
   getCurrentPosition() {
-    const waypoints = this.route.waypoints;
+  const waypoints = this.route.waypoints;
+  
+  // Handle stop behavior
+  if (this.isAtStop) {
+    const currentWaypoint = waypoints[this.currentWaypointIndex];
+    const stopDuration = currentWaypoint.stopDuration || 120;
     
-    if (this.isAtStop) {
-      const currentWaypoint = waypoints[this.currentWaypointIndex];
-      const stopDuration = currentWaypoint.stopDuration || 120;
-      
-      if (Date.now() - this.stopStartTime >= stopDuration * 1000) {
-        this.isAtStop = false;
-        this.stopStartTime = null;
-        console.log(`Bus ${this.busId} departing from ${currentWaypoint.name}`);
-      } else {
-        const position = this.addGPSNoise(currentWaypoint.lat, currentWaypoint.lng);
-        return {
-          ...position,
-          speed: 0,
-          heading: this.heading,
-          status: 'at_stop',
-          currentStop: currentWaypoint.name
-        };
-      }
+    if (Date.now() - this.stopStartTime >= stopDuration * 1000) {
+      this.isAtStop = false;
+      this.stopStartTime = null;
+      console.log(`Bus ${this.busNumber} departing from ${currentWaypoint.name}`);
+    } else {
+      const position = this.addGPSNoise(currentWaypoint.lat, currentWaypoint.lng);
+      return {
+        ...position,
+        speed: 0,
+        heading: this.heading,
+        status: 'at_stop',
+        currentStop: currentWaypoint.name
+      };
     }
+  }
 
-    let currentWaypoint, nextWaypoint;
+  let currentWaypoint, nextWaypoint;
+  
+  if (this.direction === 'outbound') {
+    currentWaypoint = waypoints[this.currentWaypointIndex];
+    nextWaypoint = waypoints[this.currentWaypointIndex + 1];
+  } else {
+    currentWaypoint = waypoints[this.currentWaypointIndex];
+    nextWaypoint = waypoints[this.currentWaypointIndex - 1];
+  }
+
+  // Check if we've reached the end of the route
+  if (!nextWaypoint) {
+    // Reverse direction
+    if (this.direction === 'outbound') {
+      console.log(`Bus ${this.busNumber} reached destination, reversing to inbound`);
+      this.direction = 'inbound';
+      this.currentWaypointIndex = waypoints.length - 1;
+      nextWaypoint = waypoints[this.currentWaypointIndex - 1];
+    } else {
+      console.log(`Bus ${this.busNumber} returned to origin, reversing to outbound`);
+      this.direction = 'outbound';
+      this.currentWaypointIndex = 0;
+      nextWaypoint = waypoints[1];
+    }
+    this.progress = 0;
+    
+    // Don't snap - smoothly continue from current position
+    currentWaypoint = waypoints[this.currentWaypointIndex];
+  }
+
+  const position = this.interpolatePosition(currentWaypoint, nextWaypoint, this.progress);
+  
+  this.speed = this.calculateRealisticSpeed();
+  this.heading = this.calculateBearing(
+    currentWaypoint.lat, currentWaypoint.lng,
+    nextWaypoint.lat, nextWaypoint.lng
+  );
+
+  const segmentDistance = this.calculateDistance(
+    currentWaypoint.lat, currentWaypoint.lng,
+    nextWaypoint.lat, nextWaypoint.lng
+  );
+  
+  // Calculate progress based on speed and time
+  const progressIncrement = (this.speed / 3600) / segmentDistance;
+  this.progress += progressIncrement;
+
+  if (this.progress >= 1) {
+    this.progress = 0;
     
     if (this.direction === 'outbound') {
-      currentWaypoint = waypoints[this.currentWaypointIndex];
-      nextWaypoint = waypoints[this.currentWaypointIndex + 1];
+      this.currentWaypointIndex++;
     } else {
-      currentWaypoint = waypoints[this.currentWaypointIndex];
-      nextWaypoint = waypoints[this.currentWaypointIndex - 1];
+      this.currentWaypointIndex--;
     }
-
-    if (!nextWaypoint) {
-      this.direction = this.direction === 'outbound' ? 'inbound' : 'outbound';
-      this.progress = 0;
-      
-      if (this.direction === 'inbound') {
-        this.currentWaypointIndex = waypoints.length - 1;
-        nextWaypoint = waypoints[this.currentWaypointIndex - 1];
-      } else {
-        this.currentWaypointIndex = 0;
-        nextWaypoint = waypoints[1];
-      }
-      
-      console.log(`Bus ${this.busId} now ${this.direction} on ${this.route.name}`);
-    }
-
-    const position = this.interpolatePosition(currentWaypoint, nextWaypoint, this.progress);
     
-    this.speed = this.calculateRealisticSpeed();
-    this.heading = this.calculateBearing(
-      currentWaypoint.lat, currentWaypoint.lng,
-      nextWaypoint.lat, nextWaypoint.lng
-    );
-
-    const segmentDistance = this.calculateDistance(
-      currentWaypoint.lat, currentWaypoint.lng,
-      nextWaypoint.lat, nextWaypoint.lng
-    );
-    const progressIncrement = (this.speed / 3600) / segmentDistance;
-    this.progress += progressIncrement;
-
-    if (this.progress >= 1) {
-      this.progress = 0;
-      
-      if (this.direction === 'outbound') {
-        this.currentWaypointIndex++;
-      } else {
-        this.currentWaypointIndex--;
-      }
-      
-      const reachedWaypoint = waypoints[this.currentWaypointIndex];
-        
-      if (reachedWaypoint && reachedWaypoint.stopDuration > 0) {
-        this.isAtStop = true;
-        this.stopStartTime = Date.now();
-        console.log(`Bus ${this.busId} arrived at ${reachedWaypoint.name}`);
-      }
+    // Check if next waypoint exists and has a stop
+    const reachedWaypoint = waypoints[this.currentWaypointIndex];
+    if (reachedWaypoint && reachedWaypoint.stopDuration > 0) {
+      this.isAtStop = true;
+      this.stopStartTime = Date.now();
+      console.log(`Bus ${this.busNumber} arrived at ${reachedWaypoint.name}`);
     }
-
-    const noisyPosition = this.addGPSNoise(position.lat, position.lng);
-    
-    return {
-      ...noisyPosition,
-      speed: Math.round(this.speed * 10) / 10,
-      heading: Math.round(this.heading),
-      status: 'in_transit',
-      currentStop: null
-    };
   }
+
+  const noisyPosition = this.addGPSNoise(position.lat, position.lng);
+  
+  return {
+    ...noisyPosition,
+    speed: Math.round(this.speed * 10) / 10,
+    heading: Math.round(this.heading),
+    status: 'in_transit',
+    currentStop: null
+  };
+}
 
   async sendLocationUpdate() {
     try {
       const location = this.getCurrentPosition();
-      const dbBusId = BUS_ID_MAPPING[this.busId];
+      const dbBusId = BUS_ID_MAPPING[this.busNumber];
       
       if (!dbBusId) {
-        console.log(`No mapping for ${this.busId}`);
+        console.log(`No mapping for ${this.busNumber}`);
         return;
       }
       
@@ -392,22 +481,26 @@ class GPSSimulator {
         timestamp: new Date().toISOString()
       };
 
-      const response = await axios.post(API_URL, locationData, {
+      await axios.post(`${API_BASE_URL}/api/admin/locations`, locationData, {
         headers: {
           'Authorization': `Bearer ${ADMIN_TOKEN}`,
           'Content-Type': 'application/json'
         }
       });
 
-      console.log(`${this.busId}: ✓ Location sent - ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)} | ${location.speed}km/h`);
+      console.log(`${this.busNumber}: ✓ ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)} | ${location.speed}km/h`);
       
     } catch (error) {
-      console.error(`${this.busId}: ❌ ${error.response?.data?.message || error.message}`);
+      if (error.response?.status === 401) {
+        console.error(`${this.busNumber}: ❌ Authentication failed - token may be expired`);
+        process.exit(1);
+      }
+      console.error(`${this.busNumber}: ❌ ${error.response?.data?.message || error.message}`);
     }
   }
 
-  startSimulation(updateInterval = 30000) {
-    console.log(`Starting GPS simulation for bus ${this.busId}`);
+  startSimulation(updateInterval) {
+    console.log(`Starting GPS simulation for bus ${this.busNumber}`);
     
     this.sendLocationUpdate();
     
@@ -419,7 +512,7 @@ class GPSSimulator {
   stopSimulation() {
     if (this.simulationInterval) {
       clearInterval(this.simulationInterval);
-      console.log(`Stopped GPS simulation for bus ${this.busId}`);
+      console.log(`Stopped GPS simulation for bus ${this.busNumber}`);
     }
   }
 }
@@ -430,14 +523,14 @@ class GPSFleetSimulator {
     console.log('Initializing GPS Fleet Simulator for Sri Lanka NTC');
   }
 
-  startFleetSimulation(updateInterval = 30000) {
-    console.log(`Starting simulation for ${BUS_FLEET.length} buses across ${Object.keys(ROUTES).length} routes`);
+  startFleetSimulation(updateInterval) {
+    console.log(`\n🚀 Starting simulation for ${BUS_FLEET.length} buses across ${Object.keys(ROUTES).length} routes\n`);
     
     BUS_FLEET.forEach((busConfig, index) => {
       setTimeout(() => {
         const simulator = new GPSSimulator(busConfig);
         simulator.startSimulation(updateInterval);
-        this.activeBuses.set(busConfig.busId, simulator);
+        this.activeBuses.set(busConfig.busNumber, simulator);
       }, index * 2000);
     });
   }
@@ -451,41 +544,63 @@ class GPSFleetSimulator {
   }
 }
 
-if (require.main === module) {
-  const fleetSimulator = new GPSFleetSimulator();
-  
-  // Initialize trips first, then start simulation
-  initializeTrips()
-    .then(() => {
-      console.log('\n🚀 Starting GPS fleet simulation...\n');
-      fleetSimulator.startFleetSimulation(30000);
-    })
-    .catch(error => {
-      console.error('Failed to initialize:', error);
-      process.exit(1);
-    });
-  
-  process.on('SIGINT', () => {
-    console.log('\n\nShutting down GPS Fleet Simulator...');
-    fleetSimulator.stopFleetSimulation();
-    process.exit(0);
-  });
-}
-
-module.exports = { GPSFleetSimulator, GPSSimulator };
-
-const http = require('http');
-const PORT = process.env.PORT || 10000;
-
+// Health check server
 const server = http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ 
     status: 'running', 
     message: 'GPS Simulator is active',
+    activeBuses: BUS_FLEET.length,
     timestamp: new Date().toISOString()
   }));
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Health check server running on port ${PORT}`);
+server.listen(HEALTH_CHECK_PORT, '0.0.0.0', () => {
+  console.log(`✓ Health check server running on port ${HEALTH_CHECK_PORT}`);
 });
+
+// Main execution
+async function main() {
+  console.log('\n=== NTC GPS Simulator Starting ===\n');
+  console.log(`API Base URL: ${API_BASE_URL}`);
+  console.log(`Update Interval: ${UPDATE_INTERVAL}ms`);
+  
+  // Step 1: Login
+  const loginSuccess = await login();
+  if (!loginSuccess) {
+    console.error('\n❌ Failed to authenticate. Exiting...');
+    process.exit(1);
+  }
+  
+  // Step 2: Fetch mappings
+  const mappingsSuccess = await fetchMappings();
+  if (!mappingsSuccess) {
+    console.error('\n❌ Failed to fetch mappings. Exiting...');
+    process.exit(1);
+  }
+  
+  // Step 3: Initialize trips
+  await initializeTrips();
+  
+  // Step 4: Start simulation
+  const fleetSimulator = new GPSFleetSimulator();
+  fleetSimulator.startFleetSimulation(UPDATE_INTERVAL);
+  
+  // Graceful shutdown
+  process.on('SIGINT', () => {
+    console.log('\n\nShutting down GPS Fleet Simulator...');
+    fleetSimulator.stopFleetSimulation();
+    server.close();
+    process.exit(0);
+  });
+}
+
+// Run if this is the main module
+if (require.main === module) {
+  main().catch(error => {
+    console.error('Fatal error:', error);
+    process.exit(1);
+  });
+}
+
+module.exports = { GPSFleetSimulator, GPSSimulator };
